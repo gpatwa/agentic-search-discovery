@@ -8,8 +8,8 @@ stack="$root/infra/terraform/github-repo"
 source_backend="$root/infra/terraform/azure-discovery-pilot/backend.hcl"
 # Defaults are this repository; override to adopt a new one (see docs/REPO_SEPARATION_EXTRACTION_PLAN.md, X5):
 #   REPO=gpatwa/agentic-data-analytics STATE_KEY=github-repo/agentic-data-analytics.tfstate PROTECTED_ENVS='[]' ...
-repo="${REPO:-gpatwa/enterprise-agentic-rag}"
-state_key="${STATE_KEY:-github-repo/terraform.tfstate}"
+repo="${REPO:-gpatwa/agentic-search-discovery}"
+state_key="${STATE_KEY:-github-repo/agentic-search-discovery.tfstate}"
 protected_envs="${PROTECTED_ENVS:-[\"discovery-pilot\"]}"
 
 command -v terraform >/dev/null || { echo "terraform is required" >&2; exit 1; }

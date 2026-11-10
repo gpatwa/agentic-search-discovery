@@ -57,22 +57,16 @@ def test_discovery_change_expects_only_discovery() -> None:
     assert _files([], "main", ["services/discovery-api/app/x.py"]) == {"ci-discovery.yml"}
 
 
-def test_contract_changes_run_the_backends_that_use_them() -> None:
-    got = _files([], "main", ["packages/platform_contracts/evidence.py"])
-    assert {"ci-analytics.yml", "ci-support.yml", "ci-agentic-eval.yml"} <= got
-    # Discovery owns its contracts (services/discovery-api/app/contracts) and no longer reads packages/.
-    assert "ci-discovery.yml" not in got
-    assert "ci-landing.yml" not in got
+def test_web_change_expects_discovery() -> None:
+    assert _files([], "main", ["apps/discovery-web/src/a.ts"]) == {"ci-discovery.yml"}
 
 
 def test_renamed_file_counts_by_old_path() -> None:
-    assert "ci-landing.yml" in _files([], "main", ["apps/landing/old.ts", "elsewhere/new.ts"])
+    assert "ci-discovery.yml" in _files([], "main", ["apps/discovery-web/old.ts", "elsewhere/new.ts"])
 
 
-def test_branch_filter_excludes_stacked_prs_but_not_unfiltered_workflows() -> None:
-    got = _files([], "claude/other", ["services/discovery-api/app/x.py", "packages/platform_contracts/a.py"])
-    assert "ci-discovery.yml" not in got  # branches: [main]
-    assert "ci-agentic-eval.yml" in got  # no branch filter
+def test_branch_filter_excludes_stacked_prs() -> None:
+    assert "ci-discovery.yml" not in _files([], "claude/other", ["services/discovery-api/app/x.py"])  # branches: [main]
 
 
 def test_the_gate_never_waits_for_itself_or_for_manual_workflows() -> None:

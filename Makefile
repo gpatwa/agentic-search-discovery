@@ -1,14 +1,6 @@
 # Makefile
 
-.PHONY: help install install-analytics analytics-reference-smoke analytics-reference-up analytics-golden analytics-triage-eval analytics-proposals-eval analytics-dbt-eval analytics-prompts-eval analytics-review-eval analytics-evaluation-eval analytics-rollout-eval analytics-drift-eval analytics-poisoning-eval analytics-security-eval analytics-resilience-drill dev dev-support-web dev-analytics-api dev-analytics-web dev-products up down stop init support-demo demo-ready-local deploy infra build bootstrap init-cloud smoke-test verify destroy test test-analytics ingest \
-       infra-staging bootstrap-staging deploy-staging deploy-aws \
-       deploy-azure infra-azure build-azure bootstrap-azure bootstrap-github-repo deploy-api-azure deploy-analytics-azure deploy-landing-azure destroy-azure \
-       pause-azure resume-azure import-azure \
-       azure-dev-up azure-dev-sync azure-dev-start azure-dev-stop azure-dev-status azure-dev-ssh azure-dev-tunnel azure-dev-destroy observability-up observability-down \
-       verify-cleanup verify-cleanup-delete verify-cleanup-azure verify-cleanup-azure-delete \
-       setup lint format architecture-check architecture-build verify-context-local \
-       dev-control-plane dev-data-plane dev-split test-control-plane test-data-plane test-all \
-       discovery-repo-vars discovery-repo-vars-plan
+.PHONY: help dev-products up down infra infra-staging bootstrap-github-repo observability-up observability-down lint format dev-split discovery-repo-vars discovery-repo-vars-plan
 
 help:
 	@echo "RAG Platform Commands:"
@@ -113,30 +105,11 @@ help:
 # LOCAL DEVELOPMENT
 # ============================================================
 
-setup:
-	pip install pre-commit && pre-commit install
-	pip install -r services/api/requirements.txt
-	pip install pytest pytest-asyncio ruff
-
-install:
-	pip install -r services/api/requirements.txt
-
-install-analytics:
-	pip install -r services/analytics-api/requirements.txt
-
 lint:
 	ruff check
 
 format:
 	ruff check --fix && ruff format
-
-architecture-check:
-	./scripts/architecture/archify.sh validate architecture docs/diagrams/agentic-data-stack.architecture.json --quality showcase --json
-	./scripts/architecture/archify.sh validate workflow docs/diagrams/agentic-data-stack-request.workflow.json --quality showcase --json
-
-architecture-build: architecture-check
-	./scripts/architecture/archify.sh deliver architecture docs/diagrams/agentic-data-stack.architecture.json docs/diagrams/agentic-data-stack-system.html --quality showcase --json
-	./scripts/architecture/archify.sh deliver workflow docs/diagrams/agentic-data-stack-request.workflow.json docs/diagrams/agentic-data-stack-request.html --quality showcase --json
 
 up:
 	docker compose up -d
@@ -150,253 +123,17 @@ observability-down:
 down:
 	docker compose down
 
-stop:
-	./scripts/shutdown.sh
-
-init:
-	python3 scripts/init_local.py
-
-support-demo:
-	@python3 scripts/support_demo_acceptance.py $${API_BASE_URL:+--base-url "$$API_BASE_URL"}
-
-demo-ready-local:
-	@$(MAKE) up
-	@$(MAKE) init
-	@$(MAKE) seed-alpha
-	@curl -fsS "$${API_BASE_URL:-http://localhost:8080}/health/liveness" >/dev/null || \
-		(echo "API is not running. Start it locally with: cd services/api && uvicorn main:app --host 0.0.0.0 --port 8080 --env-file ../../.env" >&2; exit 1)
-	@$(MAKE) support-demo
-
-dev:
-	cd services/api && uvicorn main:app --reload --host 0.0.0.0 --port 8080 --env-file ../../.env
-
-dev-support-web:
-	cd apps/support-web && npm run dev -- --host 0.0.0.0
-
-dev-analytics-api:
-	cd services/analytics-api && PYTHONPATH=.:../.. uvicorn app.main:app --reload --host 0.0.0.0 --port 8090
-
-dev-analytics-web:
-	cd apps/analytics-web && npm run dev -- --host 0.0.0.0
-
 dev-products:
 	docker compose --profile products up --build
-
-ingest:
-	@if [ -z "$(FILE)" ]; then \
-		echo "Usage:"; \
-		echo "  make ingest FILE=report.pdf          # ingest a file"; \
-		echo "  make ingest FILE=./docs/             # ingest a directory"; \
-		echo "  make ingest FILE=--sample            # ingest sample data"; \
-		echo "  make ingest FILE=photo.png            # ingest image (multimodal)"; \
-		exit 1; \
-	fi
-	@set -a && . ./.env && set +a && \
-	if [ "$(FILE)" = "--sample" ]; then \
-		python3 scripts/ingest_local.py --sample; \
-	else \
-		python3 scripts/ingest_local.py "$(FILE)"; \
-	fi
-
-test:
-	pytest services/api/tests
-	cd services/analytics-api && PYTHONPATH=.:../.. pytest
-
-# Local reference stack (fakes only, no network): both smoke journeys, or serve the v2 API locally.
-analytics-reference-smoke:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack smoke
-
-analytics-reference-up:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack up
-
-# ADS-051 triage corpus (fakes only), reported against the user-approved triage thresholds.
-analytics-triage-eval:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack triage --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-052 change-proposal corpus (fakes only), reported against the user-approved thresholds.
-analytics-proposals-eval:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack proposals --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-053 dbt proposal corpus (fakes only; dbt is never run), reported against the user-approved thresholds.
-analytics-dbt-eval:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack dbt --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-054 prompt/example registry corpus (fakes only); thresholds are proposed until the user approves them.
-analytics-prompts-eval:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack prompts --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-055 review workflow corpus (fakes only); thresholds are proposed until the user approves them.
-analytics-review-eval:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack review --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-056 candidate evaluation corpus (fakes only); thresholds are proposed until the user approves them.
-analytics-evaluation-eval:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack evaluation --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-057 rollout corpus (fakes only; simulated observers); thresholds are proposed until the user approves them.
-analytics-rollout-eval:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack rollout --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-058 drift corpus (synthetic windows); alert rules and thresholds are proposed until the user approves them.
-analytics-drift-eval:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack drift --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-059 closed-loop safety and poisoning corpus (fakes only); thresholds are proposed until the user approves them.
-analytics-poisoning-eval:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack poisoning --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-067 security corpus and findings register (fakes only); thresholds are proposed until the user approves them.
-analytics-security-eval:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack security --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-068 restore and failover drills (local SQLite/DuckDB, fakes); objectives are proposed until the user approves them.
-analytics-resilience-drill:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack resilience --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-069 seeded-failure operations drill (fakes only): alerts, runbooks, diagnosis, and replay.
-analytics-operations-drill:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack operations --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-071 end-to-end correctness and PostgreSQL/DuckDB equivalence on the ADS-070 corpus (fakes only); thresholds and corpus are proposed.
-analytics-m7-correctness:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack m7 071 --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-072 context/ontology retrieval, provenance, freshness, and token-efficiency evaluation (fakes only); thresholds are proposed.
-analytics-m7-retrieval:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack m7 072 --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-073 ambiguity, abstention, unsupported-question, and calibration evaluation (fakes only); thresholds are proposed.
-analytics-m7-abstention:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack m7 073 --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-074 security, tenant-isolation, and policy adversarial evaluation (fakes only); thresholds are proposed. Not a security review.
-analytics-m7-isolation:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack m7 074 --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-075 reliability, crash/replay, dependency-failure, and chaos evaluation (fakes only); thresholds are proposed.
-analytics-m7-reliability:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack m7 075 --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-076 latency, concurrency, token, warehouse, and cost evaluation (fakes only); thresholds and prices are proposed placeholders.
-analytics-m7-performance:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack m7 076 --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-077 provider variance, degraded-mode, and rollback evaluation (fakes only); thresholds are proposed.
-analytics-m7-provider:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack m7 077 --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-078 second-tenant and Apache Ossie onboarding drill (fakes only; sandbox registry, no certification); thresholds are proposed.
-analytics-m7-onboarding:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack m7 078 --write-report ../../docs/execution/enterprise-analytics/reports
-
-# ADS-079 final evidence manifest: links artifacts by digest and lists what blocks a release. It never decides or signs; regenerate after any change.
-analytics-m7-manifest:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack m7 079 --write-report ../../docs/execution/enterprise-analytics/reports
-
-# M7-H4 cost-unit calibration mechanism checks (fakes only; not a warehouse calibration; nothing is applied by default).
-analytics-cost-calibration:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack calibration --write-report ../../docs/execution/enterprise-analytics/reports
-
-# M4 golden suite (fakes only); regenerates the report against the user-approved M4 thresholds.
-analytics-golden:
-	cd services/analytics-api && PYTHONPATH=.:../.. python3 -m reference_stack golden --write-report ../../docs/execution/enterprise-analytics/reports
-
-test-analytics:
-	cd services/analytics-api && PYTHONPATH=.:../.. pytest
-
-verify-context-local:
-	docker compose --profile search up -d opensearch
-	PYTHONPATH=.:services/analytics-api python3 scripts/verify_context_local.py
-
-seed-context:
-	python3 scripts/seed_context_layers.py
-
-seed-olist:
-	python3 scripts/seed_olist.py
-
-# Internal-alpha seed: sample threads, saved questions, glossary, and a
-# demo MCP connection. Idempotent. Set MCP_ENCRYPTION_KEY to also seed
-# the MCP demo connection (otherwise the rest still seeds and MCP is skipped).
-seed-alpha:
-	python3 scripts/seed_alpha.py
-
-# Generic dataset loader — works with any CSV dataset
-# Usage:
-#   make seed-dataset NAME=olist PATH=data/olist/
-#   make seed-dataset NAME=sales KAGGLE=username/sales-data
-#   make seed-dataset NAME=hr PATH=data/hr/ PREFIX=hr_
-seed-dataset:
-	@if [ -z "$(NAME)" ]; then \
-		echo "Usage:"; \
-		echo "  make seed-dataset NAME=olist PATH=data/olist/"; \
-		echo "  make seed-dataset NAME=sales KAGGLE=user/dataset"; \
-		echo "  make seed-dataset NAME=hr PATH=data/hr/ PREFIX=hr_"; \
-		exit 1; \
-	fi
-	@ARGS="--name $(NAME)"; \
-	if [ -n "$(KAGGLE)" ]; then ARGS="$$ARGS --kaggle $(KAGGLE)"; fi; \
-	if [ -n "$(PREFIX)" ]; then ARGS="$$ARGS --prefix $(PREFIX)"; fi; \
-	if [ -n "$(FORCE)" ]; then ARGS="$$ARGS --force"; fi; \
-	if [ -n "$(PATH)" ]; then python3 scripts/seed_dataset.py $(PATH) $$ARGS; \
-	else python3 scripts/seed_dataset.py $$ARGS; fi
-
-# ============================================================
-# AWS DEPLOYMENT
-# ============================================================
-
-# Full deployment (first time): Terraform + Docker + EKS bootstrap
-deploy-aws:
-	./scripts/deploy_aws.sh
 
 # Terraform only: provision VPC, EKS, Aurora, Redis, S3
 infra:
 	cd infra/terraform && terraform init -upgrade && terraform apply
 
-# Build Docker image and push to ECR
-build:
-	./scripts/build_push.sh
-
-# Bootstrap EKS cluster: KubeRay, Qdrant, Neo4j, Ray, Ingress, API
-bootstrap:
-	./scripts/bootstrap_cluster.sh
-
 # Initialize cloud databases (Qdrant collections, Neo4j indexes)
 # Plan the repository settings stack (auto-merge, branch cleanup, CI gate ruleset). APPLY=1 applies it.
 bootstrap-github-repo:
 	@APPLY=$(APPLY) ./scripts/bootstrap_github_repo.sh
-
-init-cloud:
-	python3 scripts/init_cloud.py
-
-# Helm upgrade API only (for code changes after initial deploy)
-deploy:
-	@ACCOUNT_ID=$$(aws sts get-caller-identity --query Account --output text); \
-	TAG=$$(git rev-parse --short HEAD 2>/dev/null || echo "v0.1.0"); \
-	helm upgrade --install api deploy/helm/api \
-		--set image.repository="$${ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/rag-backend-api" \
-		--set image.tag="$${TAG}" \
-		--namespace default
-
-# Full post-deploy verification (pods + port-forward + DB init + smoke test + UI)
-verify:
-	./scripts/post_deploy_verify.sh
-
-# Smoke tests only (requires port-forward already running)
-smoke-test:
-	./scripts/smoke_test.sh
-
-# Destroy ALL AWS cloud resources (requires confirmation)
-destroy:
-	./scripts/cleanup.sh
-	@echo ""
-	@echo "Running post-destroy verification..."
-	./scripts/verify-cleanup.sh
-
-verify-cleanup:
-	./scripts/verify-cleanup.sh
-
-verify-cleanup-delete:
-	./scripts/verify-cleanup.sh --delete
 
 # Terraform for staging (isolated state key + staging.tfvars)
 infra-staging:
@@ -405,147 +142,9 @@ infra-staging:
 	    -backend-config="key=staging/terraform.tfstate" && \
 	terraform apply -var-file=envs/staging.tfvars
 
-# Bootstrap staging EKS cluster (uses staging cluster name + staging values)
-bootstrap-staging:
-	CLUSTER_NAME=rag-platform-staging \
-	HELM_VALUES_FILE=deploy/helm/api/values-staging.yaml \
-	./scripts/bootstrap_cluster.sh
-
-# Helm upgrade API only on staging
-deploy-staging:
-	@ACCOUNT_ID=$$(aws sts get-caller-identity --query Account --output text); \
-	TAG=$$(git rev-parse --short HEAD 2>/dev/null || echo "v0.1.0"); \
-	aws eks update-kubeconfig --name rag-platform-staging --region us-east-1; \
-	helm upgrade --install api deploy/helm/api \
-		-f deploy/helm/api/values-staging.yaml \
-		--set image.repository="$${ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/rag-backend-api" \
-		--set image.tag="$${TAG}" \
-		--namespace default
-
-# ============================================================
-# AZURE DEPLOYMENT
-# ============================================================
-
-# Full Azure deployment (first time): Terraform + Docker + AKS bootstrap
-deploy-azure:
-	./scripts/deploy_azure.sh
-
-# Azure Terraform only: provision VNet, AKS, PostgreSQL, Redis, Storage, ACR
-infra-azure:
-	cd infra/terraform/azure && terraform init -upgrade && terraform apply
-
-# Build Docker image and push to ACR
-build-azure:
-	CLOUD_PROVIDER=azure ./scripts/build_push.sh
-
-# Bootstrap AKS cluster: KubeRay, Qdrant, Neo4j, Ingress, API
-bootstrap-azure:
-	./scripts/bootstrap_cluster_azure.sh
-
-# Helm upgrade API only on AKS (for code changes after initial deploy)
-deploy-api-azure:
-	@ACR_NAME=$${ACR_NAME:-ragplatformacr}; \
-	TAG=$$(git rev-parse --short HEAD 2>/dev/null || echo "v0.1.0"); \
-	helm upgrade --install api deploy/helm/api \
-		-f deploy/helm/api/values-azure.yaml \
-		--set image.repository="$${ACR_NAME}.azurecr.io/rag-backend-api" \
-		--set image.tag="$${TAG}" \
-		--namespace default
-
-# Build and deploy the standalone analytics product to an existing Azure AKS cluster.
-deploy-analytics-azure:
-	./scripts/deploy_azure_analytics.sh
-
-# Build and publish the public landing page to Azure Static Web Apps.
-deploy-landing-azure:
-	./scripts/deploy_azure_landing.sh
-
-# Import manually-created Azure resources into Terraform state (run once before first apply)
-import-azure:
-	./scripts/terraform_import_azure.sh
-
-# Stop AKS + Postgres, delete Redis, release orphaned IPs, prune ACR — saves most daily Azure cost.
-# No durable data loss. Reversible with make resume-azure + make infra-azure.
-# Use --force flag to skip confirmations: make pause-azure ARGS=--force
-pause-azure:
-	./scripts/pause_azure.sh $(ARGS)
-
-# Start Postgres back up. Redis is recreated on next make infra-azure / deploy-azure.
-resume-azure:
-	./scripts/resume_azure.sh
-
-# Destroy ALL Azure cloud resources (requires confirmation)
-destroy-azure:
-	./scripts/cleanup_azure.sh
-	@echo ""
-	@echo "Running post-destroy verification (Azure)..."
-	./scripts/verify-cleanup-azure.sh
-
-# ============================================================
-# AZURE REMOTE DOCKER DEVELOPMENT
-# ============================================================
-
-azure-dev-up:
-	./scripts/azure_dev.sh up
-
-azure-dev-sync:
-	./scripts/azure_dev.sh sync
-
-azure-dev-start:
-	./scripts/azure_dev.sh start
-
-azure-dev-stop:
-	./scripts/azure_dev.sh stop
-
-azure-dev-status:
-	./scripts/azure_dev.sh status
-
-azure-dev-ssh:
-	./scripts/azure_dev.sh ssh
-
-azure-dev-tunnel:
-	./scripts/azure_dev.sh tunnel
-
-azure-dev-destroy:
-	./scripts/azure_dev.sh destroy --yes
-
-verify-cleanup-azure:
-	./scripts/verify-cleanup-azure.sh
-
-verify-cleanup-azure-delete:
-	./scripts/verify-cleanup-azure.sh --delete
-
-# ============================================================
-# SPLIT-PLANE DEVELOPMENT
-# ============================================================
-
-# Run control plane locally (port 8001)
-dev-control-plane:
-	cd services/control-plane && ENV=dev uvicorn main:app --reload --host 0.0.0.0 --port 8001
-
-# Run data plane locally (port 8080)
-dev-data-plane:
-	cd services/data-plane && uvicorn main:app --reload --host 0.0.0.0 --port 8080
-
 # Run both planes via Docker Compose (with all dependencies)
 dev-split:
 	docker compose --profile split up -d
-
-# Run control plane tests only
-test-control-plane:
-	pytest services/control-plane/tests/ -x -q
-
-# Run data plane tests only
-test-data-plane:
-	pytest services/data-plane/tests/ -x -q
-
-# Run all tests (monolith + control plane + data plane)
-# Each suite runs in its own pytest session to avoid conftest.py namespace collisions
-test-all:
-	pytest services/api/tests/ -x -q && \
-	(cd services/analytics-api && PYTHONPATH=.:../.. pytest -x -q) && \
-	pytest services/control-plane/tests/ -x -q && \
-	pytest services/data-plane/tests/ -x -q
 
 # Discovery pilot: set the GitHub repository variables the Discovery workflows read from `terraform output`
 # (identifiers and names only, no secrets; uses your own `gh` session). Idempotent. Run after `terraform apply`.

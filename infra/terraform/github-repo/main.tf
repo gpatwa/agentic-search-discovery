@@ -27,7 +27,7 @@ variable "owner" {
 
 variable "repository" {
   type    = string
-  default = "enterprise-agentic-rag"
+  default = "agentic-search-discovery"
 }
 
 variable "required_check" {
