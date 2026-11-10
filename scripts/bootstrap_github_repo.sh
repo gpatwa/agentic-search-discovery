@@ -24,7 +24,8 @@ export GITHUB_TOKEN="$(gh auth token)"
 cd "$stack"
 terraform init -input=false -backend-config=backend.hcl >/dev/null
 
-in_state() { terraform state list 2>/dev/null | grep -qx "$1"; }
+# Capture first: `grep -q` exiting early would otherwise SIGPIPE terraform and fail the pipeline under pipefail.
+in_state() { local listed; listed="$(terraform state list 2>/dev/null || true)"; grep -qx "$1" <<<"$listed"; }
 
 if ! in_state github_repository.this; then
   echo "importing the existing repository into state (no change to GitHub)"
