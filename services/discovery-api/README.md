@@ -38,3 +38,5 @@ DISCOVERY_TEST_OPENSEARCH_URL=http://localhost:9200 PYTHONPATH=.:../.. pytest -q
 ```
 
 The integration tests are skipped unless the URL is set. The rest run against an in-process fake cluster.
+
+> This service now lives in `agentic-search-discovery`, extracted with its history from the `enterprise-agentic-rag` monorepo (now `agentic-resolution-intelligence`).
