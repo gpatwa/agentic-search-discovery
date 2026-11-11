@@ -6,11 +6,20 @@ resource "azuread_application" "github_vm" {
   display_name     = "${local.name}-github-vm-operator"
   sign_in_audience = "AzureADMyOrg"
   owners           = [data.azuread_client_config.current.object_id]
+
+  # Whoever runs Terraform (a person, or the CI apply identity) is not part of the desired state: do not churn ownership.
+  lifecycle {
+    ignore_changes = [owners]
+  }
 }
 
 resource "azuread_service_principal" "github_vm" {
   client_id = azuread_application.github_vm.client_id
   owners    = [data.azuread_client_config.current.object_id]
+
+  lifecycle {
+    ignore_changes = [owners]
+  }
 }
 
 # One credential per allowed GitHub environment. The subject is exact (repository and environment): a workflow in
@@ -22,7 +31,7 @@ resource "azuread_application_federated_identity_credential" "github_vm" {
   description    = "Search VM start/stop workflow in ${var.github_repository}, environment ${each.value}"
   audiences      = ["api://AzureADTokenExchange"]
   issuer         = "https://token.actions.githubusercontent.com"
-  subject        = "repo:${var.github_repository}:environment:${each.value}"
+  subject        = "${var.github_subject_prefix}:environment:${each.value}"
 }
 
 # Least privilege: a custom role that exists only on the search VM and allows exactly what the workflow runs

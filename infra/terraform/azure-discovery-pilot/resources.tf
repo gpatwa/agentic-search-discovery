@@ -226,7 +226,7 @@ resource "azuread_application" "web" {
   # The identifier URI api://<client_id> contains the client id, which exists only after creation, so it is its own
   # resource (azuread_application_identifier_uri) and the application must not fight it.
   lifecycle {
-    ignore_changes = [identifier_uris]
+    ignore_changes = [identifier_uris, owners]
   }
 }
 
@@ -244,6 +244,8 @@ resource "azuread_service_principal" "web" {
 
   # Fail closed: the pilot is never open to everyone, and an empty list must be a plan error, not an empty app.
   lifecycle {
+    ignore_changes = [owners]
+
     precondition {
       condition     = length(local.signin_object_ids) > 0
       error_message = "Name at least one account in access (access.auto.tfvars) or allowed_user_object_ids."

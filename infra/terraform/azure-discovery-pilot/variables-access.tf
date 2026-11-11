@@ -34,7 +34,13 @@ variable "enable_api_auth" {
 variable "github_repository" {
   description = "owner/name of the repository whose workflows may start and stop the search VM."
   type        = string
-  default     = "gpatwa/enterprise-agentic-rag"
+  default     = "gpatwa/agentic-search-discovery"
+}
+
+variable "github_subject_prefix" {
+  description = "The OIDC subject prefix GitHub issues for the repository above. These repositories use the immutable form (owner and repository IDs); read it with: gh api repos/OWNER/NAME/actions/oidc/customization/sub --jq .sub_claim_prefix"
+  type        = string
+  default     = "repo:gpatwa@72292/agentic-search-discovery@1453303354"
 }
 
 variable "github_environments" {

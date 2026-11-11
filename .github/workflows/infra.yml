@@ -1,0 +1,105 @@
+# Infrastructure as code for the Discovery pilot. Nothing here needs a stored secret or a manual step.
+#
+#   pull request  -> plan only (read-only identity), summary lists what would change
+#   merge to main -> if the plan only adds or changes: apply automatically
+#                    if it destroys or replaces anything: wait for the owner's approval (infra-apply-destructive)
+#
+# Identities and variables come from infra/terraform/platform-identity in agentic-resolution-intelligence.
+name: Infra (Terraform)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/terraform/azure-discovery-pilot/**"
+      - ".github/actions/terraform/**"
+      - ".github/workflows/infra.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/terraform/azure-discovery-pilot/**"
+      - ".github/actions/terraform/**"
+      - ".github/workflows/infra.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+# Applies must not be cancelled half-way; runs queue.
+concurrency:
+  group: infra-discovery
+  cancel-in-progress: false
+
+env:
+  STACK: infra/terraform/azure-discovery-pilot
+  CONFIG_BLOB: config/discovery.tfvars.json
+
+jobs:
+  plan:
+    name: Terraform plan
+    runs-on: ubuntu-latest
+    outputs:
+      changes: ${{ steps.tf.outputs.changes }}
+      destructive: ${{ steps.tf.outputs.destructive }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: tf
+        uses: ./.github/actions/terraform
+        with:
+          stack: ${{ env.STACK }}
+          mode: plan
+          client-id: ${{ vars.INFRA_PLAN_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          state-resource-group: ${{ vars.TF_STATE_RESOURCE_GROUP }}
+          state-storage: ${{ vars.TF_STATE_STORAGE }}
+          state-container: ${{ vars.TF_STATE_CONTAINER }}
+          state-key: ${{ vars.TF_STATE_KEY }}
+          config-blob: ${{ env.CONFIG_BLOB }}
+          resource-group: ${{ vars.PILOT_RESOURCE_GROUP }}
+
+  apply:
+    name: Terraform apply
+    needs: plan
+    if: github.event_name != 'pull_request' && needs.plan.outputs.changes == 'true' && needs.plan.outputs.destructive != 'true'
+    runs-on: ubuntu-latest
+    environment: infra-apply
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/terraform
+        with:
+          stack: ${{ env.STACK }}
+          mode: apply
+          client-id: ${{ vars.INFRA_APPLY_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          state-resource-group: ${{ vars.TF_STATE_RESOURCE_GROUP }}
+          state-storage: ${{ vars.TF_STATE_STORAGE }}
+          state-container: ${{ vars.TF_STATE_CONTAINER }}
+          state-key: ${{ vars.TF_STATE_KEY }}
+          config-blob: ${{ env.CONFIG_BLOB }}
+          resource-group: ${{ vars.PILOT_RESOURCE_GROUP }}
+
+  apply-destructive:
+    name: Terraform apply (destroys or replaces, needs approval)
+    needs: plan
+    if: github.event_name != 'pull_request' && needs.plan.outputs.destructive == 'true'
+    runs-on: ubuntu-latest
+    environment: infra-apply-destructive
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/terraform
+        with:
+          stack: ${{ env.STACK }}
+          mode: apply
+          allow-destroy: "true"
+          client-id: ${{ vars.INFRA_APPLY_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          state-resource-group: ${{ vars.TF_STATE_RESOURCE_GROUP }}
+          state-storage: ${{ vars.TF_STATE_STORAGE }}
+          state-container: ${{ vars.TF_STATE_CONTAINER }}
+          state-key: ${{ vars.TF_STATE_KEY }}
+          config-blob: ${{ env.CONFIG_BLOB }}
+          resource-group: ${{ vars.PILOT_RESOURCE_GROUP }}
