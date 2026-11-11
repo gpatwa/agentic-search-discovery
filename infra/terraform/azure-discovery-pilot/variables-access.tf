@@ -37,6 +37,12 @@ variable "github_repository" {
   default     = "gpatwa/agentic-search-discovery"
 }
 
+variable "github_subject_prefix" {
+  description = "The OIDC subject prefix GitHub issues for the repository above. These repositories use the immutable form (owner and repository IDs); read it with: gh api repos/OWNER/NAME/actions/oidc/customization/sub --jq .sub_claim_prefix"
+  type        = string
+  default     = "repo:gpatwa@72292/agentic-search-discovery@1453303354"
+}
+
 variable "github_environments" {
   description = "GitHub deployment environments allowed to sign in as the VM operator identity (one federated credential each). The workflow's environment input must be one of these."
   type        = list(string)

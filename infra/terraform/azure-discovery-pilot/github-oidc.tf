@@ -31,7 +31,7 @@ resource "azuread_application_federated_identity_credential" "github_vm" {
   description    = "Search VM start/stop workflow in ${var.github_repository}, environment ${each.value}"
   audiences      = ["api://AzureADTokenExchange"]
   issuer         = "https://token.actions.githubusercontent.com"
-  subject        = "repo:${var.github_repository}:environment:${each.value}"
+  subject        = "${var.github_subject_prefix}:environment:${each.value}"
 }
 
 # Least privilege: a custom role that exists only on the search VM and allows exactly what the workflow runs
