@@ -1,14 +1,25 @@
 name: Deploy Discovery pilot (Container Apps)
 
-# Manual only. Infrastructure is created by infra/terraform/azure-discovery-pilot (see its README); this workflow ships code.
-# Images are tagged with the commit SHA. After a deploy, the Terraform image-tag variables lag the running revision until the next apply.
+# Manual only. Infrastructure is managed by the Infra workflow (infra/terraform/azure-discovery-pilot); this workflow ships code.
+# No stored secret: it signs in with GitHub OIDC as the narrow `discovery-deploy` identity (infra/terraform/platform-identity in
+# agentic-resolution-intelligence) from the main-only `pilot-deploy` environment. Every name comes from repository variables.
+#
+#   mode deploy  build both images (tagged with the commit SHA), push them, point the API and the web app at them
+#   mode verify  sign in, log in to the registry and re-apply each app's CURRENT image (a no-op). Proves the identity and its
+#                permissions end to end and changes nothing.
+#
+# After a deploy the Terraform image tags are not out of date: the Infra workflow reads the live tags on every run.
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: GitHub deployment environment
+      mode:
+        description: deploy ships code; verify only checks sign-in and permissions
         required: true
-        type: environment
+        type: choice
+        options:
+          - deploy
+          - verify
+        default: deploy
 
 permissions:
   contents: read
@@ -17,12 +28,15 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: pilot-deploy
     env:
-      API_IMAGE: ${{ secrets.DISCOVERY_ACR_LOGIN_SERVER }}/discovery-api:${{ github.sha }}
-      WEB_IMAGE: ${{ secrets.DISCOVERY_ACR_LOGIN_SERVER }}/discovery-web:${{ github.sha }}
-      # Web sign-in settings come from Terraform (enable_api_auth) through repository variables set by
-      # `make discovery-repo-vars`; they are all set or all empty, never typed by hand.
+      MODE: ${{ inputs.mode }}
+      RG: ${{ vars.PILOT_RESOURCE_GROUP }}
+      ACR_NAME: ${{ vars.PILOT_ACR_NAME }}
+      API_APP: ${{ vars.PILOT_API_APP }}
+      WEB_APP: ${{ vars.PILOT_WEB_APP }}
+      # Web sign-in settings come from the Discovery stack's output (kept in step by the platform identity stack); they are
+      # all set or all empty, never typed by hand.
       VITE_ENTRA_CLIENT_ID: ${{ vars.DISCOVERY_ENTRA_CLIENT_ID }}
       VITE_ENTRA_TENANT_ID: ${{ vars.DISCOVERY_ENTRA_TENANT_ID }}
       VITE_ENTRA_API_SCOPE: ${{ vars.DISCOVERY_ENTRA_API_SCOPE }}
@@ -30,21 +44,37 @@ jobs:
       - uses: actions/checkout@v4
       - uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ vars.DEPLOY_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - name: Check the web sign-in settings are complete
         run: |
           set=0
           for v in "$VITE_ENTRA_CLIENT_ID" "$VITE_ENTRA_TENANT_ID" "$VITE_ENTRA_API_SCOPE"; do [ -n "$v" ] && set=$((set + 1)); done
           if [ "$set" -ne 0 ] && [ "$set" -ne 3 ]; then
-            echo "::error::Only $set of the 3 DISCOVERY_ENTRA_* repository variables are set; a partial web sign-in config would break the app. Run 'make discovery-repo-vars'."
+            echo "::error::Only $set of the 3 DISCOVERY_ENTRA_* repository variables are set; a partial web sign-in config would break the app."
             exit 1
           fi
           if [ "$set" -eq 0 ]; then echo "Web sign-in settings are empty: building the web app without a token (API auth is off)."; fi
-      - name: Build and push the images
+      - name: Log in to the registry
         run: |
-          az acr login --name "${{ secrets.DISCOVERY_ACR_LOGIN_SERVER }}"
+          az acr login --name "$ACR_NAME"
+          echo "ACR_LOGIN_SERVER=$ACR_NAME.azurecr.io" >> "$GITHUB_ENV"
+      - name: Verify (no change)
+        if: env.MODE == 'verify'
+        run: |
+          for app in "$API_APP" "$WEB_APP"; do
+            image="$(az containerapp show -n "$app" -g "$RG" --query "properties.template.containers[0].image" -o tsv)"
+            echo "$app runs ${image##*/}; re-applying the same image (no-op)"
+            az containerapp update -n "$app" -g "$RG" --image "$image" --query "properties.provisioningState" -o tsv
+          done
+      - name: Build and push the images
+        if: env.MODE == 'deploy'
+        run: |
+          API_IMAGE="$ACR_LOGIN_SERVER/discovery-api:${{ github.sha }}"
+          WEB_IMAGE="$ACR_LOGIN_SERVER/discovery-web:${{ github.sha }}"
+          echo "API_IMAGE=$API_IMAGE" >> "$GITHUB_ENV"
+          echo "WEB_IMAGE=$WEB_IMAGE" >> "$GITHUB_ENV"
           docker build --platform linux/amd64 -t "$API_IMAGE" -f services/discovery-api/Dockerfile .
           docker build --platform linux/amd64 \
             --build-arg VITE_ENTRA_CLIENT_ID="$VITE_ENTRA_CLIENT_ID" \
@@ -54,6 +84,7 @@ jobs:
           docker push "$API_IMAGE"
           docker push "$WEB_IMAGE"
       - name: Update the API and the web app
+        if: env.MODE == 'deploy'
         run: |
-          az containerapp update -n "${{ secrets.DISCOVERY_API_APP_NAME }}" -g "${{ secrets.DISCOVERY_RESOURCE_GROUP }}" --image "$API_IMAGE"
-          az containerapp update -n "${{ secrets.DISCOVERY_WEB_APP_NAME }}" -g "${{ secrets.DISCOVERY_RESOURCE_GROUP }}" --image "$WEB_IMAGE"
+          az containerapp update -n "$API_APP" -g "$RG" --image "$API_IMAGE"
+          az containerapp update -n "$WEB_APP" -g "$RG" --image "$WEB_IMAGE"
