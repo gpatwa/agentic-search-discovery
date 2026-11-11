@@ -34,7 +34,7 @@ variable "enable_api_auth" {
 variable "github_repository" {
   description = "owner/name of the repository whose workflows may start and stop the search VM."
   type        = string
-  default     = "gpatwa/enterprise-agentic-rag"
+  default     = "gpatwa/agentic-search-discovery"
 }
 
 variable "github_environments" {

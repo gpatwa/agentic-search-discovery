@@ -86,3 +86,6 @@ services/discovery-api/data/
 # Terraform backend settings and plans are local to each operator
 infra/terraform/*/backend.hcl
 infra/terraform/*/tfplan
+
+# Personal inputs fetched from private storage at run time (see .github/actions/terraform)
+infra/terraform/*/personal.auto.tfvars.json

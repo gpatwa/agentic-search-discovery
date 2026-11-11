@@ -1,0 +1,96 @@
+name: Terraform (plan or apply)
+description: >-
+  Signs in to Azure with GitHub OIDC (no stored secret), prepares the stack's inputs, then plans or applies it. Never prints
+  attribute values: this repository is public.
+inputs:
+  stack: { description: Path of the Terraform stack, required: true }
+  mode: { description: plan or apply, required: true }
+  allow-destroy: { description: Let an apply delete or replace resources, default: "false" }
+  client-id: { required: true }
+  tenant-id: { required: true }
+  subscription-id: { required: true }
+  state-resource-group: { required: true }
+  state-storage: { required: true }
+  state-container: { required: true }
+  state-key: { required: true }
+  config-blob: { description: Private blob in the state container with personal inputs (a tfvars JSON), default: "" }
+  resource-group: { description: Pilot resource group (for ci-prepare.sh), default: "" }
+  key-vault: { description: Pilot Key Vault (for ci-prepare.sh), default: "" }
+outputs:
+  changes: { value: "${{ steps.plan.outputs.changes }}" }
+  destructive: { value: "${{ steps.plan.outputs.destructive }}" }
+runs:
+  using: composite
+  steps:
+    - uses: azure/login@v2
+      with:
+        client-id: ${{ inputs.client-id }}
+        tenant-id: ${{ inputs.tenant-id }}
+        subscription-id: ${{ inputs.subscription-id }}
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.14.4
+        terraform_wrapper: false
+    - name: Prepare inputs
+      shell: bash
+      working-directory: ${{ inputs.stack }}
+      env:
+        PILOT_RESOURCE_GROUP: ${{ inputs.resource-group }}
+        PILOT_KEY_VAULT: ${{ inputs.key-vault }}
+        CONFIG_BLOB: ${{ inputs.config-blob }}
+        STATE_STORAGE: ${{ inputs.state-storage }}
+        STATE_CONTAINER: ${{ inputs.state-container }}
+      run: |
+        set -euo pipefail
+        if [ -n "$CONFIG_BLOB" ]; then
+          az storage blob download --account-name "$STATE_STORAGE" --container-name "$STATE_CONTAINER" \
+            --name "$CONFIG_BLOB" --file personal.auto.tfvars.json --auth-mode login --only-show-errors -o none
+        fi
+        if [ -f ci-prepare.sh ]; then bash ci-prepare.sh; fi
+    - name: Terraform init
+      shell: bash
+      working-directory: ${{ inputs.stack }}
+      run: |
+        terraform init -input=false -no-color -backend-config=state.hcl \
+          -backend-config="resource_group_name=${{ inputs.state-resource-group }}" \
+          -backend-config="storage_account_name=${{ inputs.state-storage }}" \
+          -backend-config="container_name=${{ inputs.state-container }}" \
+          -backend-config="key=${{ inputs.state-key }}" >/dev/null
+    - name: Terraform plan
+      id: plan
+      shell: bash
+      working-directory: ${{ inputs.stack }}
+      env:
+        MODE: ${{ inputs.mode }}
+      run: |
+        lock=""; if [ "$MODE" = "plan" ]; then lock="-lock=false"; fi
+        set +e
+        terraform plan -input=false -no-color $lock -detailed-exitcode -out=tfplan > plan.txt 2>&1
+        rc=$?
+        set -e
+        if [ "$rc" = "1" ]; then
+          echo "::error::terraform plan failed. Error lines (values are not printed):"
+          grep -E "^(Error|│ Error)" -A4 plan.txt | head -40 || true
+          exit 1
+        fi
+        terraform show -json tfplan > plan.json
+        python3 "${{ github.action_path }}/summarize_plan.py" plan.json
+    - name: Terraform apply
+      if: inputs.mode == 'apply' && steps.plan.outputs.changes == 'true'
+      shell: bash
+      working-directory: ${{ inputs.stack }}
+      env:
+        ALLOW_DESTROY: ${{ inputs.allow-destroy }}
+        DESTRUCTIVE: ${{ steps.plan.outputs.destructive }}
+      run: |
+        if [ "$DESTRUCTIVE" = "true" ] && [ "$ALLOW_DESTROY" != "true" ]; then
+          echo "::error::the plan destroys or replaces resources; it must run from the infra-apply-destructive environment."
+          exit 1
+        fi
+        terraform apply -input=false -no-color tfplan > apply.txt 2>&1 || { grep -E "Error" -A4 apply.txt | head -40; exit 1; }
+        grep -E "^Apply complete" apply.txt
+    - name: Remove local plan files
+      if: always()
+      shell: bash
+      working-directory: ${{ inputs.stack }}
+      run: rm -f tfplan plan.json plan.txt apply.txt personal.auto.tfvars.json
