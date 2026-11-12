@@ -67,6 +67,7 @@ class DiscoverySettings(BaseModel):
     azure_openai_api_key: str | None = Field(default=None, max_length=512, repr=False)
     azure_openai_api_version: str = Field(default="2024-10-21", max_length=32)
     azure_openai_auth: Literal["key", "managed_identity", "az_cli"] = "key"
+    intent_snapshot_path: str | None = Field(default=None, max_length=1024)
     intent_provider: Literal["none", "azure_openai_chat"] = "none"
     intent_deployment: str | None = Field(default=None, max_length=255)
     intent_max_requests: int = Field(default=1000, ge=1, le=1_000_000)
@@ -211,6 +212,7 @@ def settings_from_env(environ: Mapping[str, str] | None = None) -> DiscoverySett
         "AZURE_OPENAI_API_KEY": "azure_openai_api_key",
         "AZURE_OPENAI_API_VERSION": "azure_openai_api_version",
         "AZURE_OPENAI_AUTH": "azure_openai_auth",
+        "INTENT_SNAPSHOT_PATH": "intent_snapshot_path",
         "ENTRA_TENANT_ID": "entra_tenant_id",
         "ENTRA_AUDIENCE": "entra_audience",
         "ENTRA_JWKS_URL": "entra_jwks_url",

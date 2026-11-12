@@ -159,3 +159,25 @@ So the latency bar (p95 under 1.5 s) is met for served hits, because the model i
 show: the golden queries are all distinct, so the "head" here is just the first half and the 0.50 hit rate is an artefact
 of that split, not a traffic estimate. A real hit rate needs a real query log. Relevance is still unmeasured (G3), and the
 snapshot is not wired into the API routes. Shadow mode and serving remain gated (G6).
+
+## Wired into search (2026-11-12, owner-requested; off by default)
+
+Set `DISCOVERY_INTENT_SNAPSHOT_PATH` to a snapshot file and `/v1/search` adds up to 3 extra lexical sources (named
+`intent_lexical_1..3`, top 10 each) for the precomputed suggestions of that query, fused with the normal source by the
+existing fusion. Unset (the default), nothing changes. Properties:
+
+- No model call while serving; the query path only reads the loaded snapshot.
+- Extras use the same retriever, eligibility and blocked-ID handling as the main source; suggestions come from the validated,
+  guardrailed adapter, so they cannot widen what a caller may see.
+- A missing or invalid snapshot file is logged and ignored at startup; any adapter error is swallowed per request. Search
+  never fails because of this feature.
+- The extra source names show in the decision trace's retrieval-stage reason codes; the adapter's outcomes (ok, miss) are
+  recorded in-process on `app.state.intent_observer` (no endpoint was added).
+
+Smoke run (not an evaluation): the live-built snapshot loaded over the fictional demo catalog; six head queries returned
+`provider_ok` with the three extra sources in the trace, and an unseen query returned `provider_miss` with only the normal
+source. Result counts there mean nothing, because the snapshot was built from the golden queries, not this catalog.
+
+**Still unmeasured: whether the suggestions improve relevance.** The extras get equal weight in fusion, so they can change
+rankings. Per G6 this stays off until the owner sets thresholds and a relevance comparison (ESCI subset or a real query log)
+shows it is better. README claims are unchanged.
