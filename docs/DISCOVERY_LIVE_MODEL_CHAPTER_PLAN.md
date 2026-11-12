@@ -210,3 +210,41 @@ misspelling matches the baseline avoided).
 - The G3 safety bars were met earlier except live latency, which the snapshot design removes from the query path. The
   numeric relevance pass bar was never set, so there is no pass or fail yet.
 - README claims stay unchanged and the wiring stays off by default until you decide (G6, G7).
+
+## Real ESCI evaluation (2026-11-12, owner-approved download; local benchmark only)
+
+Data: Amazon Shopping Queries (ESCI), `shopping_queries_dataset_examples.parquet` (51.3 MB) and `..._products.parquet`
+(1.11 GB) from github.com/amazon-science/esci-data (Git LFS), SHA-256 checked against the LFS pointers. Kept in an untracked
+scratch folder; never committed or copied anywhere. Cite Reddy et al. (2022), arXiv:2206.06588. The data terms are still not
+confirmed by the owner (`license_status` stays `unconfirmed`); this is a local benchmark only, no hosted use.
+
+The first real-data run exposed a bug the synthetic fixtures could not: `product_search.build_report` split
+`products.jsonl` with `splitlines()`, which breaks on U+2028 and U+0085 inside real titles (fixed in PR #16, with a
+regression test that fails before the fix).
+
+Setup: the existing ingest builds the US 25,000-product subset (seed 7; 482,088 candidates, 17 quarantined for control
+characters). BM25 baseline on the 4,717 held-out queries: nDCG@10 0.449, Exact recall@10 0.619, but only 10% of the top 10
+is judged at all (90% unjudged counts as grade 0), so absolute numbers are conservative. Then
+`python -m app.evaluation.product_intent_eval`: a deterministic sample of **200 held-out queries** (never dev queries), a
+live snapshot from `gpt-6-luna` with a retail-products prompt (344 HTTP requests incl. retries, 739 s; 161 of 200 queries
+kept an entry after validation and the catalogue-vocabulary guardrail), then BM25 versus BM25 fused with up to 3
+suggestions (RRF k=60, equal weights, top 10 per suggestion; the same shape as the search wiring), and a control with the
+suggestions attached to the wrong queries.
+
+| Configuration | nDCG@10 (200 queries) | Paired delta vs baseline (95% bootstrap CI) | Wins / losses / ties |
+|---|---|---|---|
+| BM25 baseline | 0.441 | n/a | n/a |
+| BM25 + suggestions | 0.450 | +0.009 (-0.026 to +0.041) | 44 / 35 / 121 |
+| Control: wrong suggestions | 0.180 | -0.261 (-0.304 to -0.219) | 1 / 101 / 98 |
+
+**Reading.** On real ESCI data the suggestions did **not** measurably improve relevance: the interval includes zero. This
+does not replicate the +0.19 nDCG seen on the 30-query synthetic golden corpus, which should be treated as an artefact of a
+tiny, hand-written corpus. The control shows two things: the suggestions do carry query-specific information (wrong ones
+hurt a lot), and equal-weight fusion is risky, because bad suggestions drag results down far more than good ones lift them.
+
+**Not tried, and not claimed.** Down-weighting suggestions, a score threshold, or a different prompt; any of these would be
+tuned on the dev split, not the held-out one, and needs more live calls. Other limits: one 25k subset, one model, one
+seed, one sample of 200; judged share is only 10%; BM25 is a floor, not the pilot's OpenSearch ranking.
+
+**Consequence for the wiring.** Keep `DISCOVERY_INTENT_SNAPSHOT_PATH` unset (the default). Nothing here supports turning
+it on for product search, and the golden-corpus gain should not be quoted as evidence. README claims are unchanged.

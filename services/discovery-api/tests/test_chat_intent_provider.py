@@ -56,7 +56,7 @@ def test_construction_makes_no_request_and_hides_the_key() -> None:
 
     assert fake.requests == []
     assert "test-key" not in repr(provider)
-    assert provider.cache_name == f"azure-chat:deploy-1:{PROMPT_VERSION}"
+    assert provider.cache_name == f"azure-chat:deploy-1:{PROMPT_VERSION}:default"
 
 
 def test_success_goes_through_the_adapter_and_model_only_supplies_expansions_and_rewrites() -> None:
@@ -244,3 +244,17 @@ def test_enabled_settings_build_a_provider_without_a_network_call() -> None:
 
     assert isinstance(provider, ChatIntentProvider) and fake.requests == []
     assert provider.deployment == "d"
+
+
+def test_domain_changes_the_prompt_and_the_cache_name_and_is_validated() -> None:
+    fake = _Fake(_reply(GOOD))
+    provider = _provider(fake, domain="retail products")
+    provider.generate("running shoes")
+
+    system = json.loads(fake.requests[0].content)["messages"][0]["content"]
+    assert "retail products" in system and "games" not in system
+    assert provider.cache_name.endswith(":retail-products")
+    with pytest.raises(ValueError, match="domain"):
+        _provider(_Fake(), domain="  ")
+    with pytest.raises(ValueError, match="domain"):
+        _provider(_Fake(), domain="x" * 81)
