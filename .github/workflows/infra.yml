@@ -1,3 +1,4 @@
+# Drift check 2026-11-11: this PR exists only to run a plan-only Infra job against live state.
 # Infrastructure as code for the Discovery pilot. Nothing here needs a stored secret or a manual step.
 #
 #   pull request  -> plan only (read-only identity), summary lists what would change
