@@ -111,3 +111,24 @@ how the hit rate is measured.
    `docs/DISCOVERY_ESCI_SCOPE.md`, or something else)?
 4. G4: spend ceiling for stage 2.
 5. Do you want stage 1 started now? It needs no live call and no cloud change.
+
+## Stage 2 result (run 2026-11-12, owner-approved)
+
+One offline run of `python -m app.evaluation.intent_live_eval`: deployment `gpt-6-luna` on `compass-pilot-openai`, the 30
+synthetic golden queries, account key read into process memory only (the Azure CLI identity got HTTP 401 because the Owner
+role has no data-plane access; no role was changed). Nothing was served.
+
+| Bar (G3) | Result | Met? |
+|---|---|---|
+| Contract violations served | 0: every answer went through strict validation and the guardrail; parser meaning preserved on 30/30 | yes |
+| Fallback rate at most 5% | 1 of 30 (3.3%), reason `provider_invalid` | yes |
+| p95 latency under 1.5 s | p50 3.7 s, p95 9.8 s | **no** |
+| Relevance on the ESCI subset | not run: no ESCI data is present locally and downloading it was not approved | open |
+
+Other facts: 41 HTTP requests for 30 queries (the extra 11 were retries; the status codes were not recorded); the guardrail
+dropped 77 of 266 suggestions (29%). Cost is not computed because no verified price is known. This says nothing about
+relevance quality, and 30 synthetic queries are a small sample.
+
+**Reading.** The live path is safe at the contract level but too slow for the query path as configured. Per G6 this does not
+move to shadow or serving. Options for the owner: a faster deployment or lower reasoning effort (unverified), or the
+Instacart-style split: precompute intents for head queries offline into the cache and serve only cache hits online.
