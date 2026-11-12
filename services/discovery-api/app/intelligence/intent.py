@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.query.parser import MAX_EXACT_TERMS, MAX_QUERY_LENGTH, ParsedQuery, QueryConstraints, parse_query
 
-INTENT_VERSION = "imd-intent-v1"
+INTENT_VERSION = "imd-intent-v2"
 MAX_EXPANSIONS = 8
+MAX_REWRITES = 8
 MAX_EXPANSION_LENGTH = 64
 MAX_EXPANSION_TOTAL = 512
 MAX_CATALOG_IDS = 16
@@ -31,6 +33,29 @@ def _validate_texts(
     return values
 
 
+class RewriteKind(StrEnum):
+    """Why a rewrite exists; each kind has a different retrieval purpose."""
+
+    SYNONYM = "synonym"  # same meaning, different words
+    BROADER = "broader"  # a wider query, used when results are thin
+    SUBSTITUTE = "substitute"  # a different thing a searcher would accept
+
+
+class IntentRewrite(BaseModel):
+    """One bounded, typed rewrite of the query."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    kind: RewriteKind
+    text: str = Field(min_length=1, max_length=MAX_EXPANSION_LENGTH)
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        _validate_texts((value,), field_name="rewrite text", max_length=MAX_EXPANSION_LENGTH)
+        return value.strip()
+
+
 class StructuredDiscoveryIntent(BaseModel):
     """Safe optional intent output layered on top of deterministic parsing.
 
@@ -49,6 +74,7 @@ class StructuredDiscoveryIntent(BaseModel):
     no_result_expected: bool = False
     explicit_catalog_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=MAX_CATALOG_IDS)
     expansions: tuple[str, ...] = Field(default_factory=tuple, max_length=MAX_EXPANSIONS)
+    rewrites: tuple[IntentRewrite, ...] = Field(default_factory=tuple, max_length=MAX_REWRITES)
 
     @field_validator("exact_terms")
     @classmethod
@@ -74,6 +100,16 @@ class StructuredDiscoveryIntent(BaseModel):
         if len(" ".join(values)) > MAX_EXPANSION_TOTAL:
             raise ValueError(f"expansions cannot exceed {MAX_EXPANSION_TOTAL} total characters")
         return tuple(value.strip() for value in values)
+
+    @field_validator("rewrites", mode="before")
+    @classmethod
+    def deduplicate_rewrites(cls, values: object) -> object:
+        if isinstance(values, (tuple, list)):
+            try:
+                return tuple(dict.fromkeys(values))
+            except TypeError:  # unhashable entries are left for normal validation to reject
+                return values
+        return values
 
     @field_validator("lexical_text")
     @classmethod
@@ -101,6 +137,7 @@ class StructuredDiscoveryIntent(BaseModel):
         *,
         expansions: Iterable[str] = (),
         explicit_catalog_ids: Iterable[str] = (),
+        rewrites: Iterable[IntentRewrite] = (),
     ) -> "StructuredDiscoveryIntent":
         """Attach bounded optional intelligence without changing parser output."""
         return cls(
@@ -111,6 +148,7 @@ class StructuredDiscoveryIntent(BaseModel):
             no_result_expected=parsed_query.no_result_expected,
             explicit_catalog_ids=tuple(explicit_catalog_ids),
             expansions=tuple(expansions),
+            rewrites=tuple(rewrites),
         )
 
     def preserves(self, parsed_query: ParsedQuery) -> bool:
@@ -127,10 +165,12 @@ def build_intent(
     *,
     expansions: Iterable[str] = (),
     explicit_catalog_ids: Iterable[str] = (),
+    rewrites: Iterable[IntentRewrite] = (),
 ) -> StructuredDiscoveryIntent:
     """Build an intent deterministically; no provider or network is involved."""
     return StructuredDiscoveryIntent.from_parsed_query(
         parse_query(raw_query),
         expansions=expansions,
         explicit_catalog_ids=explicit_catalog_ids,
+        rewrites=rewrites,
     )
