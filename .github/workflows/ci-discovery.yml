@@ -29,7 +29,7 @@ concurrency:
 jobs:
   api:
     name: Discovery API Lint & Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: services/discovery-api
@@ -60,7 +60,7 @@ jobs:
 
   web:
     name: Discovery Web Type-check, Test & Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: apps/discovery-web
@@ -88,7 +88,7 @@ jobs:
 
   images:
     name: Discovery Docker Build (${{ matrix.product }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [api, web]
     strategy:
       matrix:
@@ -125,7 +125,7 @@ jobs:
 
   terraform:
     name: Discovery Terraform Validate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: infra/terraform/azure-discovery-pilot
