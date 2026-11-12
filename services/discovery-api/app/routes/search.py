@@ -20,6 +20,7 @@ from app.contracts.discovery import (
 )
 from app.domain.models import ImmersiveDiscoveryContext, UserProfile
 from app.embedding import HashingEmbedder
+from app.intelligence.adapter import IntentResolution
 from app.policy.eligibility import compile_eligibility
 from app.query.parser import parse_query
 from app.ranking.router import (
@@ -156,6 +157,15 @@ def _components() -> tuple[DiscoveryComponentVersion, ...]:
     )
 
 
+_MAX_INTENT_SUGGESTIONS = 3
+_INTENT_SOURCE_LIMIT = 10
+
+
+class IntentResolver(Protocol):
+    def resolve(self, raw_query: str) -> IntentResolution:
+        ...
+
+
 @dataclass(frozen=True)
 class Retrieval:
     """Candidate sources plus the display data the response needs, whatever backend produced them."""
@@ -177,7 +187,9 @@ class LocalSearchService:
         *,
         embedder: HashingEmbedder | None = None,
         features: FeatureFlags | None = None,
+        intent_adapter: IntentResolver | None = None,
     ) -> None:
+        self._intent_adapter = intent_adapter
         self._documents = tuple(documents)
         self._profiles = tuple(profiles)
         self._retriever = LexicalRetriever()
@@ -234,6 +246,58 @@ class LocalSearchService:
         titles = {document.experience_id: document.title for document in self._documents}
         return Retrieval(tuple(sources), evidence, titles, pool=len(self._documents), fallback=fallback)
 
+    def _lexical_only(
+        self, text: str, context: ImmersiveDiscoveryContext, profile: UserProfile | None
+    ) -> tuple[CandidateSourceResult, dict[str, tuple[str, ...]], dict[str, str]]:
+        """One lexical lookup with no embedding call; used for optional intent suggestions."""
+        lexical = self._retriever.retrieve(text, self._documents, context, profile, source_version="imd-lexical-v1")
+        titles = {document.experience_id: document.title for document in self._documents}
+        return lexical.source_result, {item.experience_id: item.matched_fields for item in lexical.evidence}, titles
+
+    def _with_intent_sources(
+        self, retrieval: Retrieval, query: str, context: ImmersiveDiscoveryContext, profile: UserProfile | None
+    ) -> Retrieval:
+        """Add bounded extra lexical sources for precomputed intent suggestions; never fails the search.
+
+        Suggestions come from `BoundedIntentAdapter` (validated, guardrailed). Extras use the same retriever,
+        eligibility and blocked-ID handling as the main source, so they cannot widen what a caller may see.
+        """
+        adapter = self._intent_adapter
+        if adapter is None:
+            return retrieval
+        try:
+            resolution = adapter.resolve(query)
+            if resolution.used_fallback:
+                return retrieval
+            suggestions = tuple(
+                dict.fromkeys(
+                    (*resolution.intent.expansions, *(item.text for item in resolution.intent.rewrites))
+                )
+            )[:_MAX_INTENT_SUGGESTIONS]
+            sources = list(retrieval.sources)
+            evidence = dict(retrieval.evidence)
+            titles = dict(retrieval.titles)
+            for index, suggestion in enumerate(suggestions, start=1):
+                source, matched, extra_titles = self._lexical_only(suggestion, context, profile)
+                name = f"intent_lexical_{index}"
+                sources.append(
+                    source.model_copy(
+                        update={
+                            "source": name,
+                            "candidates": tuple(
+                                candidate.model_copy(update={"source": name})
+                                for candidate in source.candidates[:_INTENT_SOURCE_LIMIT]
+                            ),
+                        }
+                    )
+                )
+                for experience_id, fields in matched.items():
+                    evidence.setdefault(experience_id, fields)
+                titles.update(extra_titles)
+            return Retrieval(tuple(sources), evidence, titles, retrieval.pool, retrieval.fallback)
+        except Exception:  # optional enrichment must never break search
+            return retrieval
+
     def search(self, request: SearchRequest) -> SearchResponse:
         started = datetime.now(timezone.utc)
         components = _components()
@@ -261,6 +325,7 @@ class LocalSearchService:
         try:
             parsed = parse_query(request.query)
             retrieval = self._retrieve(parsed.lexical_text or request.query, context, profile)
+            retrieval = self._with_intent_sources(retrieval, request.query, context, profile)
             blocked = set(request.blocked_ids)
             sources = tuple(
                 source.model_copy(

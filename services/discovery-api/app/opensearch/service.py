@@ -41,6 +41,13 @@ class OpenSearchSearchService(LocalSearchService):
         except (ValueError, EmbeddingError):
             return None
 
+    def _lexical_only(self, text: str, context: ImmersiveDiscoveryContext, profile: UserProfile | None):  # type: ignore[no-untyped-def]
+        try:
+            lexical, titles = self._remote.lexical(text, context, profile)
+        except (OpenSearchUnavailable, OpenSearchError):
+            return super()._lexical_only(text, context, profile)
+        return lexical.source_result, {item.experience_id: item.matched_fields for item in lexical.evidence}, titles
+
     def _retrieve(self, text: str, context: ImmersiveDiscoveryContext, profile: UserProfile | None) -> Retrieval:
         sources: list[CandidateSourceResult] = []
         evidence: dict[str, tuple[str, ...]] = {}
