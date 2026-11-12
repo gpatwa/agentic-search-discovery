@@ -181,3 +181,32 @@ source. Result counts there mean nothing, because the snapshot was built from th
 **Still unmeasured: whether the suggestions improve relevance.** The extras get equal weight in fusion, so they can change
 rankings. Per G6 this stays off until the owner sets thresholds and a relevance comparison (ESCI subset or a real query log)
 shows it is better. README claims are unchanged.
+
+## Relevance evaluation on the golden corpus (2026-11-12)
+
+`python -m app.evaluation.intent_relevance`: runs the real `LocalSearchService` over the golden experiences for every golden
+query, once as the deterministic baseline and once with a snapshot, and scores both against the golden graded judgments
+(k=10). The snapshot is built from query text only (`gpt-6-luna`, 30 live requests plus 7 retries, 27 of 30 queries got an
+entry), never from judgments. A control attaches the same suggestions to the wrong queries (values rotated by one).
+
+27 queries have at least one relevant judgment and were scored.
+
+| Metric @10 | Baseline | With suggestions | Delta | Wins / losses / ties | Control (shuffled) delta |
+|---|---|---|---|---|---|
+| nDCG | 0.377 | 0.567 | +0.191 | 14 / 3 / 10 | -0.000 |
+| Recall | 0.451 | 0.698 | +0.247 | 11 / 2 / 14 | +0.080 |
+| MRR | 0.370 | 0.577 | +0.208 | 13 / 2 / 12 | -0.003 |
+
+Reading: on this corpus the suggestions help, and the gain is not just "an extra source changes the ranking": the shuffled
+control leaves nDCG and MRR flat (recall rises slightly, which is plain broadening). Two categories got clearly worse
+(typo and near-duplicate-suppression, nDCG delta -1.0 each: the extra sources pull in the very near-duplicates or
+misspelling matches the baseline avoided).
+
+**What this is not.**
+- It is not the ESCI comparison from G3: no ESCI data is present and the download was not approved.
+- 27 scored queries and 62 judgments (unjudged results count as grade 0) on a roughly 45-document synthetic catalogue,
+  with queries and judgments written by the same hand as the fixtures. It shows direction on this corpus, not a quality
+  claim, and no significance test was run.
+- The G3 safety bars were met earlier except live latency, which the snapshot design removes from the query path. The
+  numeric relevance pass bar was never set, so there is no pass or fail yet.
+- README claims stay unchanged and the wiring stays off by default until you decide (G6, G7).
