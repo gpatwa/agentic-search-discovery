@@ -26,6 +26,15 @@ live call, not after (gate G3).
 - ADR-IMD-076 already says LLM use is offline or shadow only, never creates candidates, and falls back on timeout,
   malformed output, injection or kill switch.
 
+## Owner decisions recorded 2026-11-12 (selections made in session; not infrastructure approvals)
+
+| Gate | Decision |
+|---|---|
+| G1 | Reuse `compass-pilot-openai` for now (crosses the Compass product boundary, as the embeddings already do). |
+| G2 | The redacted query text may be sent, for the pilot only; no user, tenant or session identifiers. Note: the shared safety policy redacts secret-shaped values only, not emails or phone numbers. |
+| G3 | Guardrail and safety bars first: 0 contract violations served, fallback rate at most 5%, p95 latency under 1.5 s, relevance comparison on the ESCI subset. No quality claim from the 30 synthetic queries. |
+| G4/G5 | Live calls approved for stage 2 (offline evaluation script, not serving), ceiling about USD 5. Not approved: shadow mode, serving (G6), README claim changes (G7). |
+
 ## Stages
 
 Each stage ends with a PR that CI has passed. Stages 2 to 4 also need the owner's go-ahead in the session where they run;
