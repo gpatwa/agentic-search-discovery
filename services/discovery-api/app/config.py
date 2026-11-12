@@ -67,6 +67,11 @@ class DiscoverySettings(BaseModel):
     azure_openai_api_key: str | None = Field(default=None, max_length=512, repr=False)
     azure_openai_api_version: str = Field(default="2024-10-21", max_length=32)
     azure_openai_auth: Literal["key", "managed_identity", "az_cli"] = "key"
+    intent_provider: Literal["none", "azure_openai_chat"] = "none"
+    intent_deployment: str | None = Field(default=None, max_length=255)
+    intent_max_requests: int = Field(default=1000, ge=1, le=1_000_000)
+    intent_cost_per_request_usd: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
+    intent_max_spend_usd: float | None = Field(default=None, ge=0.0, allow_inf_nan=False)
     entra_tenant_id: str | None = Field(default=None, max_length=64)
     entra_audience: str | None = Field(default=None, max_length=255)
     entra_jwks_url: str | None = Field(default=None, max_length=512)
@@ -106,6 +111,17 @@ class DiscoverySettings(BaseModel):
                 raise ValueError("an api key is set but azure_openai_auth is not key; remove the key or the mode")
             if not self.azure_openai_endpoint.startswith("https://"):
                 raise ValueError("azure_openai_endpoint must be https")
+        if self.intent_provider == "azure_openai_chat":
+            if self.no_model:
+                raise ValueError("intent_provider=azure_openai_chat is a model call and requires no_model=False")
+            if not (self.azure_openai_endpoint and self.intent_deployment):
+                raise ValueError("azure_openai_chat needs azure_openai_endpoint and intent_deployment")
+            if not self.azure_openai_endpoint.startswith("https://"):
+                raise ValueError("azure_openai_endpoint must be https")
+            if self.azure_openai_auth == "key" and not self.azure_openai_api_key:
+                raise ValueError("azure_openai_auth=key needs an api key (or use managed_identity or az_cli)")
+            if self.azure_openai_auth != "key" and self.azure_openai_api_key:
+                raise ValueError("an api key is set but azure_openai_auth is not key; remove the key or the mode")
         if self.auth_enabled:
             if not (self.entra_tenant_id and self.entra_audience):
                 raise ValueError("auth_enabled requires entra_tenant_id and entra_audience")
