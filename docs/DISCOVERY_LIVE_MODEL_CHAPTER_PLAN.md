@@ -132,3 +132,30 @@ relevance quality, and 30 synthetic queries are a small sample.
 **Reading.** The live path is safe at the contract level but too slow for the query path as configured. Per G6 this does not
 move to shadow or serving. Options for the owner: a faster deployment or lower reasoning effort (unverified), or the
 Instacart-style split: precompute intents for head queries offline into the cache and serve only cache hits online.
+
+## Offline head-query precompute (built 2026-11-12, owner-selected route)
+
+`app/intelligence/precompute.py` and `python -m app.evaluation.intent_precompute`: pick the most frequent normalised
+queries from a log, run each once through the live provider plus strict validation and the catalogue guardrail, and save a
+snapshot (JSON, per query only `expansions` and `rewrites`). `SnapshotIntentProvider` serves it with no model and no
+network; a missing query raises `IntentMiss`, the adapter falls back to the deterministic intent, and telemetry records
+`provider_miss`. The served intent is rebuilt from the real query's parse, so an entry cannot alter parser-owned meaning,
+and every hit is re-validated. Loading refuses a snapshot from another intent version. A snapshot holds query text and
+model suggestions: handle it like the query log.
+
+Run on the 30 synthetic golden queries, with the first 15 acting as the "log" and `gpt-6-luna` as the model (account key in
+process memory only, 15 HTTP requests, no retries):
+
+| Measure | Result |
+|---|---|
+| Head queries kept in the snapshot | 15 of 15 |
+| Hit rate over all 30 queries | 0.50 (all hits are the 15 head queries) |
+| Hit rate on the 15 held-out queries | 0.00 (they fall back to the deterministic path, as designed) |
+| Serve latency from the snapshot | p50 0.10 ms, p95 0.19 ms (in-process, excludes network and the API) |
+| Model calls while serving | 0 |
+| Parser meaning preserved | 30 of 30 |
+
+So the latency bar (p95 under 1.5 s) is met for served hits, because the model is off the query path. What this does not
+show: the golden queries are all distinct, so the "head" here is just the first half and the 0.50 hit rate is an artefact
+of that split, not a traffic estimate. A real hit rate needs a real query log. Relevance is still unmeasured (G3), and the
+snapshot is not wired into the API routes. Shadow mode and serving remain gated (G6).
