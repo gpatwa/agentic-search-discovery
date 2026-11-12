@@ -340,3 +340,41 @@ def test_cli_can_evaluate_the_opensearch_retriever(
     monkeypatch.setattr(products_module, "client_from_env", lambda: down)
     assert eval_main(argv("down.json")) == 1
     assert "opensearch unavailable" in capsys.readouterr().err
+
+
+def test_report_survives_unicode_line_separators_in_product_text(tmp_path: Path) -> None:
+    """Regression: real ESCI titles contain U+2028 and U+0085; splitlines() cut those records in half."""
+    products = _csv(
+        tmp_path / "p.csv",
+        PRODUCT_FIELDS,
+        [
+            {
+                "product_id": "P1",
+                "product_locale": "us",
+                "product_title": "red running\u2028shoes\x85 size 9",
+                "product_description": "",
+                "product_bullet_point": "",
+                "product_brand": "Acme",
+                "product_color": "",
+            }
+        ],
+    )
+    examples = _csv(
+        tmp_path / "e.csv",
+        EXAMPLE_FIELDS,
+        [
+            {
+                "example_id": "e1", "query": "running shoes", "query_id": "q1", "product_id": "P1",
+                "product_locale": "us", "esci_label": "E", "small_version": "1",
+            }
+        ],
+    )
+    provenance = ProductProvenance(dataset="fixture", dataset_version="t", citation="synthetic", synthetic=True)
+    subset = tmp_path / "subset"
+    result = ingest(products, examples, provenance=provenance, limit=100, now=NOW)
+    assert len(result.records) == 1  # the separators are kept, not quarantined, so the test exercises them
+    write_subset(result, subset)
+
+    report = build_report(subset, examples, Bm25Retriever, retriever_name="bm25", held_out_fraction=0.99, now=NOW)
+
+    assert report["report_version"]

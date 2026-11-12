@@ -253,11 +253,10 @@ def build_report(
 ) -> dict[str, object]:
     """Verify the subset, evaluate dev and held-out splits, and return a JSON-ready report."""
     manifest = verify_subset(subset_dir)
-    records = [
-        ProductRecord.model_validate_json(line)
-        for line in (subset_dir / "products.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    # Iterate the file (newline-delimited), never str.splitlines(): real product text contains U+2028 and U+0085,
+    # which splitlines() treats as line breaks and so cuts a JSON record in half.
+    with (subset_dir / "products.jsonl").open("r", encoding="utf-8") as handle:
+        records = [ProductRecord.model_validate_json(line) for line in handle if line.strip()]
     queries, dropped = load_queries(examples_path, {r.product_id for r in records}, locale=manifest.locale)
     dev, held = split_queries(queries, seed=seed, held_out_fraction=held_out_fraction)
     if not held:
