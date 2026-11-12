@@ -29,6 +29,7 @@ class IntentOutcome(StrEnum):
     MODEL_OFF = "model_off"
     PROVIDER_TIMEOUT = "provider_timeout"
     PROVIDER_INVALID = "provider_invalid"
+    PROVIDER_MISS = "provider_miss"  # precomputed provider had no entry; the deterministic path served
 
 
 class IntentTelemetryRecord(BaseModel):

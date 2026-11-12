@@ -21,6 +21,10 @@ class ScriptedIntentMode(StrEnum):
     INJECTION = "injection"
 
 
+class IntentMiss(LookupError):
+    """A provider that only serves precomputed answers had none for this query (not a failure)."""
+
+
 class IntentProvider(Protocol):
     """Small provider boundary; live SDKs are deliberately out of scope."""
 
@@ -106,7 +110,12 @@ class BoundedIntentAdapter:
             if self.vocabulary is not None:
                 candidate, dropped = apply_catalog_guardrail(candidate, self.vocabulary, raw_query)
         except Exception as error:  # provider and validation failures are degraded mode
-            reason = "provider_timeout" if isinstance(error, TimeoutError) else "provider_invalid"
+            if isinstance(error, TimeoutError):
+                reason = "provider_timeout"
+            elif isinstance(error, IntentMiss):
+                reason = "provider_miss"
+            else:
+                reason = "provider_invalid"
             return IntentResolution(intent=fallback, used_fallback=True, fallback_reason=reason)
 
         del caller_context  # Context is caller-owned and is never serialized or mutated.
