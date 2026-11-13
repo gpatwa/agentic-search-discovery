@@ -248,3 +248,26 @@ seed, one sample of 200; judged share is only 10%; BM25 is a floor, not the pilo
 
 **Consequence for the wiring.** Keep `DISCOVERY_INTENT_SNAPSHOT_PATH` unset (the default). Nothing here supports turning
 it on for product search, and the golden-corpus gain should not be quoted as evidence. README claims are unchanged.
+
+## ESCI weight tuning on the dev split (2026-11-12, owner-approved)
+
+`python -m app.evaluation.product_intent_tune`. Protocol fixed before any dev result: dev and held-out queries are disjoint
+(by hash); a grid of suggestion weight (0, 0.1, 0.2, 0.3, 0.5, 1.0) x suggestions per query (1 or 3) in weighted
+reciprocal-rank fusion; select the highest mean paired nDCG delta on **dev**; call it validated only if its 95% bootstrap
+interval is above zero; score the chosen setting once on the held-out sample used before. Dev snapshot: 200 dev queries,
+live `gpt-6-luna`; only 80 of the 200 ended with a usable suggestion entry (the held-out snapshot had 161 of 200; I did not
+investigate why, so the dev result rests on fewer queries than intended).
+
+| Dev result (200 queries, 80 with suggestions) | Mean nDCG@10 delta (95% CI) |
+|---|---|
+| weight 0.1 / 0.3 / 0.5 / 1.0, 3 suggestions | +0.008 / +0.012 / +0.015 / +0.016 (all intervals include 0) |
+| weight 0.1 / 0.3 / 0.5 / 1.0, 1 suggestion | +0.005 / +0.011 / +0.012 / +0.015 (all intervals include 0) |
+
+Chosen on dev: weight 1.0, 3 suggestions (+0.016, CI -0.001 to +0.035), **not validated** (interval touches zero). Held-out
+with that setting is the earlier result: +0.009 (CI -0.026 to +0.041; 44 wins, 35 losses, 121 ties).
+
+**Reading.** Down-weighting did not help: the delta only rises with weight, and no setting separates from zero on dev or
+held-out. The effect, if there is one, is small (about +0.01 nDCG) and not distinguishable from noise at this sample size.
+No setting is recommended. Not tried: a score threshold, a different prompt, a larger sample, or fusing at the score level
+instead of the rank level. Same limits as before (one 25k subset, one model, BM25 baseline, 90% of the top 10 unjudged).
+The wiring stays off by default; README claims are unchanged.

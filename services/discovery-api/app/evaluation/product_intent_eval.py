@@ -47,20 +47,31 @@ SUGGESTION_DEPTH = 10
 DOMAIN = "retail products"
 
 
-def suggestions_for(entry: SnapshotEntry | None) -> list[str]:
+def suggestions_for(entry: SnapshotEntry | None, limit: int = MAX_SUGGESTIONS) -> list[str]:
     if entry is None:
         return []
-    return list(dict.fromkeys((*entry.expansions, *(item.text for item in entry.rewrites))))[:MAX_SUGGESTIONS]
+    return list(dict.fromkeys((*entry.expansions, *(item.text for item in entry.rewrites))))[:limit]
 
 
-def fused_ranking(retriever: Callable[[str, int], Sequence[str]], text: str, suggestions: Sequence[str], k: int) -> list[str]:
-    """RRF over the original query (full depth) and each suggestion (top `SUGGESTION_DEPTH`)."""
+def fused_ranking(
+    retriever: Callable[[str, int], Sequence[str]],
+    text: str,
+    suggestions: Sequence[str],
+    k: int,
+    *,
+    weight: float = 1.0,
+) -> list[str]:
+    """RRF over the original query (weight 1, full depth) and each suggestion (`weight`, top `SUGGESTION_DEPTH`)."""
     scores: dict[str, float] = defaultdict(float)
     order: dict[str, int] = {}
-    lists = [list(retriever(text, max(k, 50)))] + [list(retriever(s, SUGGESTION_DEPTH))[:SUGGESTION_DEPTH] for s in suggestions]
-    for ranked in lists:
+    lists = [(1.0, list(retriever(text, max(k, 50))))] + [
+        (weight, list(retriever(s, SUGGESTION_DEPTH))[:SUGGESTION_DEPTH]) for s in suggestions
+    ]
+    for list_weight, ranked in lists:
+        if list_weight <= 0:  # weight 0 must equal the baseline exactly, not just fill empty slots
+            continue
         for rank, pid in enumerate(dict.fromkeys(ranked), start=1):
-            scores[pid] += 1.0 / (RRF_K + rank)
+            scores[pid] += list_weight / (RRF_K + rank)
             order.setdefault(pid, len(order))
     return sorted(scores, key=lambda pid: (-scores[pid], order[pid]))[:k]
 
@@ -81,6 +92,8 @@ def evaluate_configs(
     snapshot: IntentSnapshot,
     *,
     k: int = 10,
+    weight: float = 1.0,
+    limit: int = MAX_SUGGESTIONS,
 ) -> dict[str, object]:
     entries = snapshot.entries
     keys = sorted(entries)
@@ -89,7 +102,7 @@ def evaluate_configs(
     def run(source: Mapping[str, SnapshotEntry]) -> list[float]:
         return [
             ndcg_at_k(
-                fused_ranking(retriever, q.text, suggestions_for(source.get(normalize_query(q.text))), k),
+                fused_ranking(retriever, q.text, suggestions_for(source.get(normalize_query(q.text)), limit), k, weight=weight),
                 q.judgments,
                 DEFAULT_GAINS,
                 k,
